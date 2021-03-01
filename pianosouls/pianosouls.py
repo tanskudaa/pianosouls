@@ -17,13 +17,6 @@ from . import config
 
 OUTPUT_API = None
 
-class MIDIChannelState:
-    def __init__(self):
-        self.notes_down     = []
-        self.notes_rel      = []
-        self.pedal_down     = False
-        self.actions_active = []
-
 # Global dictionary with current state for each MIDI channel listening to
 CH_STATE = {}
 # Global dictionary with bindings for each MIDI channel
@@ -40,8 +33,18 @@ BINDINGS = {}
 #     }
 # }
 
+# Polling rate in seconds
+POLLING_RATE = 1/60
+
+class MIDIChannelState:
+    def __init__(self):
+        self.notes_down     = []
+        self.notes_rel      = []
+        self.pedal_down     = False
+        self.actions_active = []
+
 def update_state(msg) -> None:
-    global OUTPUT_API, CH_STATE, BINDINGS
+    global OUTPUT_API, CH_STATE, BINDINGS, POLLING_RATE
 
     if OUTPUT_API == None:
         raise Exception('Output API not (successfully) initialized')
@@ -88,66 +91,80 @@ def update_state(msg) -> None:
         value         = -1
 
         # Notes
+        # Look through all notes_down that belong to this trigger and append
+        # them to list
         for n in trigger:
             for m in notes_down:
                 if n in (music.get_note_name(m), music.get_note_name(m, False)):
                     if n not in triggers_down: triggers_down.append(n)
+                    # In these conditions, the note on played this cycle
+                    # happened in this trigger; data2 can be used as the value
+                    # (velocity) for axis and button updates
                     if 144 <= status <= 159 and data1 == m: value = data2
 
-        print(trigger, tuple(triggers_down) == trigger, value)
+        # Check whether this binding needs to be updated
+        press_triggered   = (
+            tuple(triggers_down) == trigger and
+            value >= 0
+        )
+        release_triggered = (
+            tuple(triggers_down) != trigger and
+            any(t is trigger for (t, a) in actions_active)
+        )
 
-        # Triggered
-        if tuple(triggers_down) == trigger and value >= 0:
-            for a in actions:
-                rid     = a[0]
-                action  = a[1]
+        # Debug
+        # print(trigger, tuple(triggers_down) == trigger, value)
 
+        # Send updated button and axis states to API
+        for a in actions:
+            rid     = a[0]
+            action  = a[1]
+
+            overlap         = False
+            already_pressed = False
+            for tr, ac in actions_active:
+                if ac == action:
+                    already_pressed = True
+                    if tr != trigger:
+                        overlap = True
+
+            if (type(action) is str) and ('+' in action or '-' in action):
+                axis      = action
+                real_axis = action.replace('+','').replace('-','')
+
+            # Update press event
+            if press_triggered:
                 # Button
                 if type(action) is int:
+                    if already_pressed:
+                        OUTPUT_API.set_button(False, rid, action)
+                        time.sleep(POLLING_RATE)
                     OUTPUT_API.set_button(True, rid, action)
                 # Axis
-                elif type(action) is str:
-                    if '+' in action:
-                        action = action.replace('+','')
-                        value = 64 + value*(2/3)
-                    elif '-' in action:
-                        action = action.replace('-','')
-                        value = 64 - value*(2/3)
-                    OUTPUT_API.set_axis(int(value), rid, action)
-                    if (trigger, action) not in actions_active:
-                        actions_active.append((trigger, action))
-        
-        elif tuple(triggers_down) != trigger:
-            for a in actions:
-                rid     = a[0]
-                action  = a[1]
-
+                else:
+                    if   '+' in axis: value = 64 + value*(2/3)
+                    elif '-' in axis: value = 64 - value*(2/3)
+                    OUTPUT_API.set_axis(int(value), rid, real_axis)
+                # Add to active actions list
+                if not (trigger, action) in actions_active:
+                    actions_active.append((trigger, action))
+            # Update release event
+            elif release_triggered:
                 # Button
                 if type(action) is int:
-                    # overlap = False
-                    # for tr, ac in actions_active:
-                    #     if ac == action and tr != trigger: overlap = True
-                    #     break
-                    # if not overlap:
-                    OUTPUT_API.set_button(False, rid, action)
-                    # if (trigger, action) in actions_active:
-                    #     actions_active.remove((trigger, action))
+                    if not overlap:
+                        OUTPUT_API.set_button(False, rid, action)
                 # Axis
-                elif type(action) is str:
-                    if '+' in action or '-' in action:
-                        action = action.replace('+','').replace('-','')
+                else:
+                    if '+' in axis or '-' in axis:
                         value = 64
                     else:
                         value = 0
+                    OUTPUT_API.set_axis(value, rid, real_axis)
+                # Remove from active actions list
+                while (trigger, action) in actions_active:
+                    actions_active.remove((trigger, action))
 
-                    overlap = False
-                    for tr, ac in actions_active:
-                        if ac == action and tr != trigger: overlap = True
-                        break
-                    if not overlap:
-                        OUTPUT_API.set_axis(int(value), rid, action)
-                    if (trigger, action) in actions_active:
-                        actions_active.remove((trigger, action))
 
     if 128 <= status <= 239 and ch in CH_STATE:
         CH_STATE[ch].notes_down     = notes_down
@@ -158,7 +175,7 @@ def update_state(msg) -> None:
     return
 
 def main():
-    global OUTPUT_API, CH_STATE, BINDINGS
+    global OUTPUT_API, CH_STATE, BINDINGS, POLLING_RATE
 
     # Parse command line arguments
     opt_parser = OptionParser()
@@ -225,9 +242,9 @@ def main():
     # Create MIDIChannelState object for each MIDI channel listening to
     for ch in BINDINGS: CH_STATE[ch] = MIDIChannelState()
 
-    # Default to polling rate of 60Hz
-    if options.polling_rate == None: options.polling_rate = 60
-    sleep_time = float(1/options.polling_rate)
+    # Read custom polling rate, default to 60Hz
+    if options.polling_rate != None:
+        POLLING_RATE = float(1/options.polling_rate)
 
     #
     # Main loop
@@ -238,7 +255,7 @@ def main():
             if midi.DEV.poll():
                 update_state(midi.DEV.read(1))
 
-            time.sleep(sleep_time)
+            time.sleep(POLLING_RATE)
     except KeyboardInterrupt:
         print('Exiting')
         pass

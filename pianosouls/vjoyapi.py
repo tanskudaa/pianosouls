@@ -111,6 +111,12 @@ def init(devices) -> None:
         raise Exception('Trying to open illegal device')
 
     INITIALIZED = True
+
+    # Reset each axis to middle
+    for d in devices:
+        for x in AXES:
+            set_axis(64, d, x)
+
     return
 
 def close() -> None:
