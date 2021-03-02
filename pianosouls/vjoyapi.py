@@ -5,7 +5,11 @@
 import ctypes
 import winreg
 import os.path
+from threading import Timer
 
+# TODO Currently has no capability to send POV switch updates
+
+# vJoy installation registry path
 REGPATH  = 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{8E31F76F-74C3-47F1-9550-E041EEDC5FBB}_is1'
 
 AXES = {
@@ -19,52 +23,40 @@ AXES = {
     'SL1':  0x37,
     'WHL':  0x38,
 }
-DPOV = {
-    'N':    0,
-    'E':    1,
-    'S':    2,
-    'W':    3,
-}
 
-# Global initialized state flag
-INITIALIZED = False
-# Global reference to vJoy "module"
-vJoy = None
+# Global reference to vJoy library
+dll = None
 
 
-def set_axis(value:int, rid:int, axis:str):
-    if not INITIALIZED: raise Exception('vJoy not initialized')
+def update(rid:int, action:str, value:int):
+    global dll
 
-    if not (
-        all(type(p) is int for p in [value, rid])       and
-        type(axis) is str                               and
-        1 <= rid <= 16                                and
-        axis in AXES
-    ):
-        raise ValueError('Invalid parameters')
+    # Clamp between accepted values
+    value = max(value, 0)
+    value = min(value, 127)
 
-    value = max(value, 1)
-    value = min(value, 128)
-    vJoy.SetAxis(value << 8, rid, AXES[axis])
-    return
+    real_value = value
+    real_action = action .replace('+','').replace('-','')
 
-def set_button(value:bool, rid:int, button:int):
-    if not INITIALIZED: raise Exception('vJoy not initialized')
+    if real_action.isdigit():
+        # Buttons
+        real_action = int(action)
+        real_value = True if value > 0 else False
+        dll.SetBtn(real_value, rid, real_action)
+    elif real_action in AXES:
+        # Check for signed axis
+        if '-' in action:
+            real_value = 64 - ((value/2) + 1)
+        elif '+' in action:
+            real_value = 64 + ((value/2) - 1)
 
-    if not (
-        type(value) is bool                             and
-        all(type(p) is int for p in [rid, button])      and
-        1 <= rid    <= 16                               and
-        1 <= button <= 128
-    ):
-        raise ValueError('Invalid parameters')
+        dll.SetAxis(int(real_value) << 8, rid, AXES[real_action])
 
-    vJoy.SetBtn(value, rid, button)
-    return
+
 
 def init(devices) -> None:
-    global INITIALIZED, vJoy
-    if INITIALIZED: return
+    ''' Initialize vJoy '''
+    global dll
 
     # Load vJoy
     vjoy_install_path = ''
@@ -75,8 +67,6 @@ def init(devices) -> None:
             'InstallLocation'
         )[0]
         winreg.CloseKey(vjoy_regkey)
-
-        print('vJoy installation found at', vjoy_install_path)
     except OSError:
         raise Exception('Couldn\'t find vJoy, is vJoy installed?')
 
@@ -86,44 +76,35 @@ def init(devices) -> None:
             'x64',
             'vJoyInterface.dll'
         )
-        vJoy = ctypes.WinDLL(vjoy_dll_path)
-        print(
-            'vJoy loaded succesfully! (using ver. {})'
-            .format(vJoy.GetvJoyVersion())
-        )
+        dll = ctypes.WinDLL(vjoy_dll_path)
     except:
         raise Exception('Couldn\'t load vJoyInterface.dll')
 
-    if not vJoy.vJoyEnabled():
+    if not dll.vJoyEnabled():
         raise Exception('Error: vJoy version 2.x not installed or enabled')
 
     # Load virtual joystick(s)
     try:
         for a in devices:
-            vjd_acquired = vJoy.AcquireVJD(int(a))
-            print('Acquired virtual joystick', a)
+            vjd_acquired = dll.AcquireVJD(int(a))
             if not vjd_acquired:
                 err = 'Couldn\'t acquire virtual joystick {}, device not free'
                 raise Exception(err.format(a))
             else:
-                vJoy.ResetVJD(int(a))
+                dll.ResetVJD(int(a))
     except:
         raise Exception('Trying to open illegal device')
 
-    INITIALIZED = True
-
-    # Reset each axis to middle
+    # Reset all axes to middle
     for d in devices:
         for x in AXES:
-            set_axis(64, d, x)
+            update(d, x, 64)
 
     return
 
 def close() -> None:
-    global INITIALIZED, vJoy
-    if not INITIALIZED: return
+    ''' Relinguish virtual joysticks '''
+    global dll
 
-    vJoy.RelinquishVJD(1)
-
-    INITIALIZED = False
+    dll.RelinquishVJD(1)
     return

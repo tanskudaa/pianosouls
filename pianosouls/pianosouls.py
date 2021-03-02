@@ -1,31 +1,42 @@
 #
-# pianosouls
+# pianosouls.py
+# pianosouls python module entry point and main logic
 #
 # Takes MIDI inputs and, when matching configured criteria, sends gamepad/
 # joystick input commands to API
 #
 
+
+# TODO TODO Functionality to implement TODO TODO
+# Imply fifths on seventh chords
+# MIDI Control Change support
+
+
 import sys
 import os
 import time
 import importlib
+import msvcrt
 from optparse import OptionParser
 
 from . import midi
 from . import music
 from . import config
 
-OUTPUT_API = None
+# Global API module dynamically imported in main()
+apimod = None
+DEFAULT_API = 'vigemclient'
 
 # Global dictionary with current state for each MIDI channel listening to
 CH_STATE = {}
-# Global dictionary with bindings for each MIDI channel
+# Global dictionary with bindings per each MIDI channel used
 BINDINGS = {}
-# Follows the following format:
+# All trigger-action bindings stored in the following semi-incoprehensible
+# format:
 # BINDINGS = {
 #     # Channels
 #     1: {
-#         # Binding       [(Device, Action)]
+#         # Binding       [(Device, Action), (Device, Action), ...]
 #         ('C', 'E'):     [(1, 'X'), (2, 'Y')]
 #     },
 #     2: {
@@ -33,9 +44,10 @@ BINDINGS = {}
 #     }
 # }
 
-# Polling rate in seconds
+# Polling rate in seconds. Enforced to limit CPU usage.
 POLLING_RATE = 1/60
 
+# State class for each MIDI channel
 class MIDIChannelState:
     def __init__(self):
         self.notes_down     = []
@@ -44,21 +56,23 @@ class MIDIChannelState:
         self.actions_active = []
 
 def update_state(msg) -> None:
-    global OUTPUT_API, CH_STATE, BINDINGS, POLLING_RATE
+    global apimod, CH_STATE, BINDINGS, POLLING_RATE
 
-    if OUTPUT_API == None:
-        raise Exception('Output API not (successfully) initialized')
+    if apimod == None:
+        raise Exception('Output API not initialized')
 
     status, data1, data2 = msg[0][0][0:3]
     ch = (status % 16) + 1
 
+    # I am NOT writing "CH_STATE[ch]." in front of these EVERY SINGLE TIME I
+    # need them (every other line), but Python doesn't support pointers
+    # so here we are :--) I don't care to look for a handier way to unload
+    # these, there's only 4.
     if 128 <= status <= 239 and ch in CH_STATE:
         notes_down      = CH_STATE[ch].notes_down
         notes_rel       = CH_STATE[ch].notes_rel
         pedal_down      = CH_STATE[ch].pedal_down
         actions_active  = CH_STATE[ch].actions_active
-
-    # notes_changed = []
 
     # Control Change
     if 176 <= status <= 191:
@@ -69,20 +83,16 @@ def update_state(msg) -> None:
     elif 144 <= status <= 159:
         if data1 not in notes_down: notes_down.append(data1)
         if data1 in notes_rel:      notes_rel.remove(data1)
-        # notes_changed.append(data1)
     # Note off
     elif 128 <= 143:
         notes_rel.append(data1)
 
-    # Clear released notes on pedal up
+    # Clear released notes if not sustaining
     if not pedal_down:
         for n in notes_rel:
             while n in notes_down:
                 notes_down.remove(n)
-                # notes_changed.append(n)
         notes_rel.clear()
-
-    # print(notes_changed)
 
     # Update output
     # TODO This section needs heavy updating when adding CC functionality
@@ -97,12 +107,12 @@ def update_state(msg) -> None:
             for m in notes_down:
                 if n in (music.get_note_name(m), music.get_note_name(m, False)):
                     if n not in triggers_down: triggers_down.append(n)
-                    # In these conditions, the note on played this cycle
-                    # happened in this trigger; data2 can be used as the value
-                    # (velocity) for axis and button updates
+                    # Under the if-statement conditions, a "note on" played this
+                    # cycle happened in the current trigger; data2 can be used
+                    # as the value (velocity) for gamepad state updates
                     if 144 <= status <= 159 and data1 == m: value = data2
 
-        # Check whether this binding needs to be updated
+        # Check whether currently processing binding needs updating
         press_triggered   = (
             tuple(triggers_down) == trigger and
             value >= 0
@@ -112,10 +122,6 @@ def update_state(msg) -> None:
             any(t is trigger for (t, a) in actions_active)
         )
 
-        # Debug
-        # print(trigger, tuple(triggers_down) == trigger, value)
-
-        # Send updated button and axis states to API
         for a in actions:
             rid     = a[0]
             action  = a[1]
@@ -128,44 +134,20 @@ def update_state(msg) -> None:
                     if tr != trigger:
                         overlap = True
 
-            if (type(action) is str) and ('+' in action or '-' in action):
-                axis      = action
-                real_axis = action.replace('+','').replace('-','')
-
             # Update press event
             if press_triggered:
-                # Button
-                if type(action) is int:
-                    if already_pressed:
-                        OUTPUT_API.set_button(False, rid, action)
-                        time.sleep(POLLING_RATE)
-                    OUTPUT_API.set_button(True, rid, action)
-                # Axis
-                else:
-                    if   '+' in axis: value = 64 + value*(2/3)
-                    elif '-' in axis: value = 64 - value*(2/3)
-                    OUTPUT_API.set_axis(int(value), rid, real_axis)
-                # Add to active actions list
+                apimod.update(rid, action, int(value))
+                # # Add to active actions list
                 if not (trigger, action) in actions_active:
                     actions_active.append((trigger, action))
             # Update release event
             elif release_triggered:
-                # Button
-                if type(action) is int:
-                    if not overlap:
-                        OUTPUT_API.set_button(False, rid, action)
-                # Axis
-                else:
-                    if '+' in axis or '-' in axis:
-                        value = 64
-                    else:
-                        value = 0
-                    OUTPUT_API.set_axis(value, rid, real_axis)
-                # Remove from active actions list
+                apimod.update(rid, action, 0)
+                # # Remove from active actions list
                 while (trigger, action) in actions_active:
                     actions_active.remove((trigger, action))
 
-
+    # Load changed state back into the channel state object
     if 128 <= status <= 239 and ch in CH_STATE:
         CH_STATE[ch].notes_down     = notes_down
         CH_STATE[ch].notes_rel      = notes_rel
@@ -175,7 +157,8 @@ def update_state(msg) -> None:
     return
 
 def main():
-    global OUTPUT_API, CH_STATE, BINDINGS, POLLING_RATE
+    ''' Entry point for pianosouls '''
+    global apimod, CH_STATE, BINDINGS, POLLING_RATE, DEFAULT_API
 
     # Parse command line arguments
     opt_parser = OptionParser()
@@ -197,12 +180,12 @@ def main():
     )
     (options, args) = opt_parser.parse_args()
 
-    # Default to included vJoy API and check if any API module has been specified
-    api_module_name = 'vjoyapi'
+    # Default to ViGEm but check if an API module has been specified
+    api_module_name = DEFAULT_API
     if options.api_module != None: api_module_name = options.api_module
     # Try to dynamically import API module
     try:
-        OUTPUT_API = importlib.import_module('.'+api_module_name, 'pianosouls')
+        apimod = importlib.import_module('.'+api_module_name, 'pianosouls')
     except ModuleNotFoundError:
         print('Can\'t find module', api_module_name)
         sys.exit(1)
@@ -218,7 +201,7 @@ def main():
     # Load config
     BINDINGS = config.read_config(options.config_path)
 
-    # Count device ID's specified in config
+    # Gather all device ID's specified in config
     using_devices = []
     for bn in BINDINGS.values():    # for bind in bindings:
         for ls in bn.values():      # for list (of actions) in link:
@@ -226,12 +209,12 @@ def main():
                 if not ac[0] in using_devices: using_devices.append(ac[0])
     # Initialize API and output devices
     try:
-        OUTPUT_API.init(using_devices)
+        apimod.init(using_devices)
     except Exception as err:
         print(err)
         sys.exit(1)
 
-    # Open MIDI device for listening
+    # Prompt for and open MIDI device for listening
     if options.midi_device_id == None:
         options.midi_device_id = midi.prompt_device()
     if options.midi_device_id == -1:
@@ -242,27 +225,31 @@ def main():
     # Create MIDIChannelState object for each MIDI channel listening to
     for ch in BINDINGS: CH_STATE[ch] = MIDIChannelState()
 
-    # Read custom polling rate, default to 60Hz
+    # Set polling rate
     if options.polling_rate != None:
         POLLING_RATE = float(1/options.polling_rate)
 
-    #
     # Main loop
-    #
     try:
-        print(' --- Running, CTRL-C to exit --- ')
+        print(' --- Running - R to reload config - CTRL-C to exit --- ')
         while True:
             if midi.DEV.poll():
                 update_state(midi.DEV.read(1))
 
+            # R to reload config on the fly
+            if msvcrt.kbhit():
+                key = msvcrt.getch()
+                if key == b'r':
+                    BINDINGS = config.read_config(options.config_path)
+                    print('Reloaded config', options.config_path)
+
             time.sleep(POLLING_RATE)
     except KeyboardInterrupt:
         print('Exiting')
-        pass
 
-    # 85. Care says "Bye-bye"
+    # Care says "Bye-bye"
     midi.close()
-    OUTPUT_API.close()
+    apimod.close()
     sys.exit(0)
 
 if __name__ == '__main__':

@@ -1,14 +1,15 @@
+#
+# config.py
+# pianosouls module config file parser
+#
+
 import os.path
 import re
 
 from . import music
 
-#
-# TODO Do we really need or want the added complexity of multiple possible
-# actions on a single trigger?
-#
-
 def read_config(path:str) -> dict:
+    ''' Read and return pianosouls bindings from specified text file '''
     if not os.path.exists(path): return {}
 
     bindings = {}
@@ -18,11 +19,7 @@ def read_config(path:str) -> dict:
     midi_ch = 1
     rid     = 1
 
-    line_no = 0
     for l in f:
-        line_no += 1
-        # print('Reading line', line_no)
-
         # Don't process empty or commented lines
         l = l.strip()
         if len(l) == 0 or l[0] == ';': continue
@@ -58,31 +55,22 @@ def read_config(path:str) -> dict:
         #
         # Trigger-action bind declaration
         #
-        # Get the button or axis
-        # Don't check action validity here - it's just a string
+        # Get the gamepad action
+        # NOTE Action validity shouldn't be checked here. Leave it for the
+        # output module.
         action = l.split()[-1].upper()
         # Take action out, leaves only triggers
         l = l[0:len(l)-len(action)]
         l = re.sub(r'\s+', '', l)
-        # Change action to right type
-        if action.isdigit(): action = int(action)
 
         # Check that there IS information left to parse, ie. there's more than
         # one set of characters in l
         if len(l) == 0: continue
 
+        # Split triggers py comma
         l = l.split(',')
-        # Only notes allow multiple inputs for same mapping
-        only_notes = True
-        for tr in l:
-            # Case insensitivity
-            tr = tr[0].upper() + tr[1:]
-            if (
-                any(s in music.CHORD_NAME_TO_RELATION for s in tr) or
-                'CC' in tr.upper()
-            ):
-                only_notes = False
-        if len(l) > 1 and not only_notes: continue
+        # Lone comma without specified trigger - don't continue processing
+        if '' in l: continue
 
         # Home stretch
         line_valid = True
@@ -91,9 +79,9 @@ def read_config(path:str) -> dict:
             #
             # Control Change
             #
-            # if tr[0:2] == 'CC':
-            #     # TODO
-            #     continue
+            if tr[0:2] == 'CC':
+                # TODO Implement Control Change functionality some day
+                continue
 
             #
             # Musical notation
@@ -105,9 +93,7 @@ def read_config(path:str) -> dict:
                 # Check if note has an octave marking
                 if tr[i].isdigit(): is_general = False
                 # Update chord function starting index
-                if (
-                    not (tr[i] in ('#', 'b') or tr[i].isdigit())
-                ):
+                if not (tr[i] in ('#', 'b') or tr[i].isdigit()):
                     chord_func_index = i
                     break
 
@@ -121,7 +107,7 @@ def read_config(path:str) -> dict:
                 (chord_func != '' and
                 # a) it isn't listed in valid chord names
                 (not chord_func in music.CHORD_NAME_TO_RELATION or
-                # b) the chord has an octave marking
+                # b) a chord has an octave marking
                 is_general == False))
             ):
                 # print('not cool!')
@@ -138,7 +124,6 @@ def read_config(path:str) -> dict:
                     notes_indiv.append(note_id + r)
             else:
                 notes_indiv.append(music.get_note_id(tr))
-            # print(notes_indiv)
 
             # Ensure unique naming for enharmonically same notes
             for n in notes_indiv:
