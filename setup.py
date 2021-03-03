@@ -5,6 +5,12 @@ setuptools.setup(
     version = "0.8",
     author = "Taneli Hongisto",
     author_email = "taneli.hongisto@tuni.fi",
+    packages = ['pianosouls'],
+    package_data = {
+        'pianosouls': [
+            'ViGEmClient.dll'
+        ]
+    },
     license = "GNU GPLv3",
     description = "MIDI notes and chords to virtual gamepad input",
     url = "https://github.com/tanskudaa/pianosouls",
@@ -12,7 +18,7 @@ setuptools.setup(
     python_requires = '>= 3',
     entry_points = {
         'console_scripts': [
-            'pianosouls=pianosouls:main'
+            'pianosouls=pianosouls.pianosouls:main'
         ]
     }
 )

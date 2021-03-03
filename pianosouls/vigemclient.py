@@ -2,6 +2,7 @@
 # vigemclient.py
 #
 
+import os
 from ctypes import *
 from threading import Timer
 
@@ -100,7 +101,8 @@ def init(devices):
     ''' Initialize ViGEm gamepads '''
     global dll, client, pads
 
-    dll = WinDLL('./pianosouls/ViGEMClient.dll')
+    home = os.path.join(os.path.abspath(__file__), '..')
+    dll = WinDLL(os.path.join(home, 'ViGEMClient.dll'))
     # TODO try-except file not found
 
     dll.vigem_alloc.restype = POINTER(c_void_p)
