@@ -1,0 +1,7 @@
+*cache*
+.vscode
+build
+dev-misc/
+dist/
+*.egg-info
+tests/

@@ -1,14 +1,14 @@
 #
 # pianosouls.py
-# pianosouls python module entry point and main logic
-#
 # Takes MIDI inputs and, when matching configured criteria, sends gamepad/
 # joystick input commands to API
+# (C) Taneli Hongisto 2021 https://github.com/tanskudaa
+#
+# Licensed under GPLv3 https://www.gnu.org/licenses/
 #
 
 
 # TODO TODO Functionality to implement TODO TODO
-# Imply fifths on seventh chords
 # MIDI Control Change support
 
 
@@ -57,9 +57,7 @@ class MIDIChannelState:
 
 def update_state(msg) -> None:
     global apimod, CH_STATE, BINDINGS, POLLING_RATE
-
-    if apimod == None:
-        raise Exception('Output API not initialized')
+    if apimod == None: raise Exception('Output API not initialized')
 
     status, data1, data2 = msg[0][0][0:3]
     ch = (status % 16) + 1
@@ -73,6 +71,8 @@ def update_state(msg) -> None:
         notes_rel       = CH_STATE[ch].notes_rel
         pedal_down      = CH_STATE[ch].pedal_down
         actions_active  = CH_STATE[ch].actions_active
+    else:
+        return
 
     # Control Change
     if 176 <= status <= 191:
@@ -120,19 +120,18 @@ def update_state(msg) -> None:
         release_triggered = (
             tuple(triggers_down) != trigger and
             any(t is trigger for (t, a) in actions_active)
+
         )
 
         for a in actions:
-            rid     = a[0]
-            action  = a[1]
+            rid             = a[0]
+            action          = a[1]
+            action_nosign   = action.replace('+','').replace('-','')
 
-            overlap         = False
-            already_pressed = False
+            overlap = False
             for tr, ac in actions_active:
-                if ac == action:
-                    already_pressed = True
-                    if tr != trigger:
-                        overlap = True
+                if action_nosign in ac and not tr == trigger:
+                    overlap = True
 
             # Update press event
             if press_triggered:
@@ -142,7 +141,7 @@ def update_state(msg) -> None:
                     actions_active.append((trigger, action))
             # Update release event
             elif release_triggered:
-                apimod.update(rid, action, 0)
+                if not overlap: apimod.update(rid, action, 0)
                 # # Remove from active actions list
                 while (trigger, action) in actions_active:
                     actions_active.remove((trigger, action))
