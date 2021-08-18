@@ -2,7 +2,7 @@
 Emulate gamepad input with any MIDI capable instrument
 
 ## About
-pianosouls is a python application that interprets MIDI data from any MIDI input capable device and transforms it into virtual gamepad inputs. In short, it let's you play any video game with any MIDI capable digital instrument.
+pianosouls is a Python application that interprets MIDI data from any MIDI input capable device and transforms it into virtual gamepad inputs. In short, it lets you play any video game with any MIDI capable digital instrument.
 
 Some examples include:
   - Playing Dark Souls by jamming to the Firelink Shrine theme on a digital piano
@@ -10,7 +10,7 @@ Some examples include:
   - Transforming your digital piano into four distinct gamepads for split-screen multiplayer
   - Anything you can imagine
 
-pianosouls supports inputs from all 16 MIDI channels and, in theory, any arbitary number of virtual gamepads. Configuration supports musical notation and the application detects chords when they are played.
+pianosouls supports inputs from all 16 MIDI channels and, in theory, any arbitary number of virtual gamepads. Configuration supports musical notation and the application detects chords when played.
 
 MIDI Control Change functionality has not yet been implemented but is work in progress. This means sliders and knobs aren't yet registered by pianosouls, which makes the program not ideal for simulator games at it's current state.
 
@@ -30,9 +30,9 @@ Once these programs are installed, download and extract the pianosouls source. O
 
 > ```python -m pianosouls```
 
-Note that this requires you manually install it's dependency ```pygame```.
+Note that this requires you manually install its dependency ```pygame```.
 
-**(*)** Probably the only part of the program excluding 32-bit computers is ViGEmClient.dll, but as far as I know, this library **can** be built for x86. See section "ViGEm Client Native SDK/ViGEmClient.dll" for more information.
+**(*)** Likely the only part of the program preventing 32-bit execution is ViGEmClient.dll, but as far as I know, this library **can** be built for x86. See section "ViGEm Client Native SDK/ViGEmClient.dll" for further information.
 
 ## Configuration
 pianosouls uses human readable text files to configure sessions. These can be saved anywhere on your computer. From config/example.conf:
@@ -59,7 +59,7 @@ D, F, A         LT      ; Playing the notes D, F and A at the same time
                         ; these notes in particular would be identical to
                         ; writing "Dm".
 GM7             LY-     ; Playing G dominant 7th results in the gamepad
-                        ; pushing left stick (the L -part) down (the Y- -part).
+                        ; pushing left stick (L) down (Y-).
 AM7             LY+     ; Similarly, playing A dominant 7th results in
                         ; left stick up.
 
@@ -127,23 +127,23 @@ B1              RX+
 A0              Start
 ```
 ## Using pianosouls
-pianosouls is started from the command line. If you installed the recommended way (and not the alternative), then open a Powershell or Command Line window in the folder where your config file resides (my_config.txt in this example), and run:
+pianosouls is started from the command line. If you installed the recommended way, then open a Powershell or Command Line window in the folder where your config file resides (my_config.txt in this example), and run:
 > ```pianosouls.exe -c my_config.txt```
 
 The program first lists all MIDI input capable devices connected to your computer. From these, choose the one you plan on using to play.
 
 And that's it! When the program is started, Windows detectes a new x360 controller "plugged in", and you can control it with the notes and chords you have previously configured in my_config.txt.
 
-Oftentimes you'll want to change your configurations while the pianosouls program is already running, trying out which notes and chords work well for whatever you're playing. For this purpose, pianosouls can reload the config file by pressing R.
+Oftentimes you'll want to change your configurations while pianosouls is already running, trying out which notes and chords suit the game you're playing. For this purpose, pianosouls can reload the config file on the fly by pressing R on the keyboard.
 
 When you're done, Ctrl-C quits the program.
 
 ## Extending pianosouls
-I tried to design pianosouls to be as modular as possible to accommodate use cases other than sending gamepad inputs. For these purposes, the output "API" module is actually loaded dynamically at startup, and can be specified with the ```--api``` argument when starting. ```vigemclient``` is defaulted to if no ```--api``` argument is given.
+I aimed to design pianosouls to be as modular as possible to accommodate use cases other than sending gamepad inputs. For these purposes, the output "API" module is actually loaded dynamically at startup, and can be specified with the ```--api``` argument when starting. ```vigemclient``` is defaulted to if no ```--api``` argument is given.
 
 For example, a vJoy (http://vjoystick.sourceforge.net/site/index.php/77-vjoy/84-homepage-v200) feeder module ```vjoyfeeder``` is included with the source code and can be used to drive vJoy devices. Naturally, configurations must be (re-)written to send valid axis and button names; vJoy labels buttons 1-128, not ABXY.
 
-This leaves pianosouls.py completely agnostic to *what* is actually done with the processed MIDI data, which enables the easy addition of custom output modules (say, keyboard and mouse emulation, just to give an example). See vjoyfeeder.py or vigemclient.py to learn what fucntions are expected to be available on output modules.
+This leaves pianosouls.py completely agnostic to *what* is actually done with the processed MIDI data, which enables the easy addition of custom output modules (say, keyboard and mouse emulation as an example). See vjoyfeeder.py or vigemclient.py to learn what fucntions are expected to be available on output modules.
 
 ## ViGEm Client Native SDK/ViGEmClient.dll
 pianosouls sources and consequently the installed python package includes the binary file "ViGEmClient.dll". This DLL is a completely non-modified redistribution of the ViGEm Client Native SDK, the source of which can be found at https://github.com/ViGEm/ViGEmClient. vigemclient.py uses this SDK to spawn and feed virtual x360 controllers in ViGEmBus.
